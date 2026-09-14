@@ -1,0 +1,42 @@
+{
+  "name": "dan-oss-array",
+  "version": "0.1.0",
+  "description": "[DAN] ARRAY — P2P .env sync, no central server. Basic tier: generic AES-256-GCM encryption, LAN peer discovery, zero runtime dependencies.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "dan-oss-array": "bin/dan-oss-array.js"
+  },
+  "scripts": {
+    "prepare": "husky || true",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin",
+    "src",
+    "public",
+    "examples",
+    "LICENSE",
+    "TRADEMARK.md"
+  ],
+  "keywords": [
+    "env",
+    "secrets",
+    "p2p",
+    "sync",
+    "cli",
+    "developer-tools"
+  ],
+  "author": "DAN Systems",
+  "homepage": "https://github.com/STRATO-DAN/dan-oss-array",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/STRATO-DAN/dan-oss-array.git"
+  }
+}
