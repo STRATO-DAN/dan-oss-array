@@ -1,5 +1,5 @@
 {
-  "name": "dan-oss-array",
+  "name": "@strato-dan/array",
   "version": "0.1.0",
   "description": "[DAN] ARRAY — P2P .env sync, no central server. Basic tier: generic AES-256-GCM encryption, LAN peer discovery, zero runtime dependencies.",
   "license": "MIT",
