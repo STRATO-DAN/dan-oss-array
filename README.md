@@ -7,14 +7,14 @@
 **P2P `.env` sync over your LAN — no central server to leak, breach, or go down.**
 
 [![CI](https://github.com/STRATO-DAN/dan-oss-array/actions/workflows/ci.yml/badge.svg)](https://github.com/STRATO-DAN/dan-oss-array/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/dan-oss-array.svg)](https://www.npmjs.com/package/dan-oss-array)
+[![npm version](https://img.shields.io/npm/v/@strato-dan/array.svg)](https://www.npmjs.com/package/@strato-dan/array)
 [![runtime deps](https://img.shields.io/badge/runtime%20deps-0-2e9e56.svg)](#dependencies)
 [![status](https://img.shields.io/badge/status-experimental-b5750a.svg)](#honest-limits)
 [![license](https://img.shields.io/badge/license-MIT-informational.svg)](LICENSE)
 
 </div>
 
-> **⚡ Zero install · zero runtime dependencies.** `npx dan-oss-array` runs it — pure Node standard
+> **⚡ Zero install · zero runtime dependencies.** `npx @strato-dan/array` runs it — pure Node standard
 > library (Node ≥ 18), nothing to install. Full breakdown under [Dependencies](#dependencies).
 
 P2P `.env` sync. No central server.
@@ -29,7 +29,7 @@ the same network — no server in the middle to leak, get breached, or go down.
 ## Use
 
 ```bash
-npx dan-oss-array
+npx @strato-dan/array
 ```
 
 Opens at `http://127.0.0.1:4873` (loopback only — the UI, not the transfer, is local-only).
@@ -142,7 +142,7 @@ Failed as expected: Could not decrypt the received data — wrong passphrase, or
 | | |
 |---|---|
 | **Runtime dependencies** | **0** — Node standard library only (`dgram`, `net`, `crypto`, `http`) |
-| **Install to run** | none — `npx dan-oss-array` |
+| **Install to run** | none — `npx @strato-dan/array` |
 | **Install to test** | none — `npm test` uses Node's built-in test runner |
 | **Node** | ≥ 18 |
 | **Dev-only** | `husky` — pulled in only if you clone to contribute; never needed to use the tool |
