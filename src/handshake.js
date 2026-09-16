@@ -20,7 +20,7 @@
 // scrypt (N=16384) makes that costly, and it yields a passphrase guess, never the payload of a past
 // session (that rode an ephemeral key the attacker never had). Higher assurance = the advanced tier.
 import crypto from "node:crypto";
-import { passphraseKey, sealCapsule, openCapsule } from "./crypto.js";
+import { passphraseKeyAsync, sealCapsule, openCapsule } from "./crypto.js";
 
 const HS_FRAME_CAP = 8 * 1024; // hello/confirm frames are tiny — this is generous
 export const CAPSULE_CAP = 4 * 1024 * 1024; // an env file is small; this bounds one sealed capsule
@@ -111,10 +111,10 @@ function ephemeral() {
 
 // Derive the shared session key + the receiver's confirmation MAC. `pubR`/`pubS` are the receiver's and
 // sharer's ephemeral public keys; both sides pass them in the SAME order, so both compute the same key.
-function session(privateKey, peerPubDer, pubR, pubS, passphrase, roomCode) {
+async function session(privateKey, peerPubDer, pubR, pubS, passphrase, roomCode) {
   const peer = crypto.createPublicKey({ key: peerPubDer, type: "spki", format: "der" });
   const shared = crypto.diffieHellman({ privateKey, publicKey: peer });
-  const pk = passphraseKey(passphrase, roomCode);
+  const pk = await passphraseKeyAsync(passphrase, roomCode); // async → does not block the event loop
   const transcript = Buffer.concat([pubR, pubS]);
   const sk = Buffer.from(crypto.hkdfSync("sha256", Buffer.concat([shared, pk]), transcript, HKDF_INFO, 32));
   const confirmR = crypto.createHmac("sha256", sk).update(Buffer.concat([T_RECEIVER, transcript])).digest();
@@ -129,7 +129,7 @@ export async function sharerServe(socket, { passphrase, roomCode, capsulePlain }
   const me = ephemeral();
   const pubR = await read(); // HELLO from the receiver
   writeFrame(socket, me.pub); // HELLO back
-  const { sk, confirmR } = session(me.privateKey, pubR, pubR, me.pub, passphrase, roomCode);
+  const { sk, confirmR } = await session(me.privateKey, pubR, pubR, me.pub, passphrase, roomCode);
   const got = await read(); // the receiver's passphrase proof
   if (!equal(got, confirmR)) throw new Error("peer did not prove the passphrase — refused");
   writeFrame(socket, sealCapsule(sk, capsulePlain)); // the credential, sealed under the authenticated session
@@ -143,7 +143,7 @@ export async function receiverFetch(socket, { passphrase, roomCode }) {
   const me = ephemeral();
   writeFrame(socket, me.pub); // HELLO
   const pubS = await read(); // HELLO from the sharer
-  const { sk, confirmR } = session(me.privateKey, pubS, me.pub, pubS, passphrase, roomCode);
+  const { sk, confirmR } = await session(me.privateKey, pubS, me.pub, pubS, passphrase, roomCode);
   writeFrame(socket, confirmR); // prove the passphrase first
   const capsule = await read(CAPSULE_CAP + 64); // the sealed credential
   return openCapsule(sk, capsule); // throws on a wrong session key (wrong passphrase / impostor)
