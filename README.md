@@ -76,7 +76,15 @@ they find each other directly.
   racing LAN host can no longer steal the ciphertext or deny the real receiver. Honest residual: an
   *active* impostor that lures a receiver and wins its discovery race obtains one transcript MAC it
   can attack offline against the passphrase (scrypt-hardened) — it yields a passphrase guess, never a
-  past session's payload. For higher assurance, use the advanced tier.
+  past session's payload.
+  - **Why this residual exists, and what removes it.** The residual is inherent to authenticating with
+    a shared passphrase and no PKI: the handshake produces a transcript MAC an active impostor can grind
+    *offline*, so a low-entropy passphrase is only as safe as scrypt makes it slow. The construction that
+    removes this class outright is a **PAKE** (password-authenticated key exchange): a PAKE is designed so
+    a wrong guess simply aborts the session, leaving the attacker exactly **one online guess per attempt**
+    and **no offline-attackable transcript at all** — which is what makes even a short passphrase safe.
+    Adopting a PAKE for the handshake is the concrete path to a higher-assurance tier; the current basic
+    tier deliberately keeps the simpler passphrase+scrypt binding and states this limit honestly instead.
 - **This secures the wire, not the endpoints.** It removes the central-server leak risk — it does
   not protect either machine from its own compromise.
 - Nothing is ever written to disk by this tool. The `.env` text lives in the browser tab and the
