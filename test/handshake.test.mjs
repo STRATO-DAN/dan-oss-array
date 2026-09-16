@@ -104,6 +104,18 @@ test("receive buffer is bounded: an oversized declared frame length is refused, 
   server.close();
 });
 
+// NOTE on TOTAL_CAP (frameReader's cumulative-byte guard, distinct from the per-frame length cap
+// above): traced but deliberately NOT given its own test here. Any bytes beyond what completes a
+// frame become leftover buffer content that gets re-parsed as a (garbage, near-certainly-huge)
+// declared length the instant the NEXT read() sets a waiter — which trips the per-frame check
+// (already tested above) in a handful of bytes, always well before ~4.26MB could genuinely
+// accumulate to trip the total-byte check on its own. Given TOTAL_CAP's ~64KB of slack is sized
+// exactly to cover one legitimate max-length capsule frame plus handshake overhead, this specific
+// branch isn't independently reachable through receiverFetch's real 2-read protocol without
+// constructing a synthetic multi-read harness against frameReader directly (unexported, and not
+// how the real protocol is ever driven) — so a test for it would be contrived rather than
+// adversarial. The per-frame cap test above covers the real, reachable attack surface.
+
 test("the session key needs BOTH the ephemeral secret and the passphrase (capsule opens with neither alone)", () => {
   // A capsule sealed under a real session key does not open under a key derived from only the passphrase
   // (no ephemeral secret) — proving the two are bound together, not separable.
