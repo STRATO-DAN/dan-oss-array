@@ -3,6 +3,9 @@
 // The advanced tier (DAN ENCRYPTED MODULE) is a genuinely different, proprietary mechanism and
 // lives only inside DAN MEMORY SMASH's own frontend — never here.
 import crypto from "node:crypto";
+import { promisify } from "node:util";
+
+const scrypt = promisify(crypto.scrypt);
 
 const SALT_LEN = 16;
 const IV_LEN = 12;
@@ -54,6 +57,15 @@ export function roomHash(roomCode) {
 // (N=16384) the payload encryption uses, so a captured capsule is no cheaper to attack than the blob.
 export function passphraseKey(passphrase, roomCode) {
   return crypto.scryptSync(passphrase, Buffer.from(roomHash(roomCode), "utf8"), KEY_LEN, SCRYPT_OPTS);
+}
+
+// Async twin of passphraseKey, used by the handshake. scrypt is deliberately expensive (N=16384); the
+// SYNC version blocks Node's single event-loop thread for its full duration, so an unauthenticated peer
+// that merely connects (the sharer must derive this key to check the peer's proof) could stall the whole
+// process — a cheap denial-of-service that needs no valid passphrase. The async version runs on the
+// libuv threadpool, so one handshake's key derivation no longer freezes every other socket and timer.
+export async function passphraseKeyAsync(passphrase, roomCode) {
+  return scrypt(passphrase, Buffer.from(roomHash(roomCode), "utf8"), KEY_LEN, SCRYPT_OPTS);
 }
 
 // Seal one capsule under the raw session key. Wire: iv(12) || tag(16) || ciphertext.

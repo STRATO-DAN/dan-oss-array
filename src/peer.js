@@ -6,9 +6,18 @@
 import net from "node:net";
 import { sharerServe, receiverFetch } from "./handshake.js";
 
-export function listenForOnePeer({ passphrase, roomCode, timeoutMs = 120000 } = {}) {
+export function listenForOnePeer({
+  passphrase,
+  roomCode,
+  timeoutMs = 120000,
+  handshakeTimeoutMs = 15000, // a single peer's handshake must complete in this long, or it is dropped
+  maxConcurrentHandshakes = 4, // bound pre-auth work: cap how many scrypt-bearing handshakes run at once
+} = {}) {
   const server = net.createServer();
   let settled = false;
+  let inFlight = 0;
+  let timer = null; // the overall "no peer connected in time" timer — hoisted so stop() can cancel it
+  let rejectServed = null;
   let capsulePlain = null;
   let payloadResolve = null;
   const payloadReady = new Promise((resolve) => {
@@ -21,7 +30,8 @@ export function listenForOnePeer({ passphrase, roomCode, timeoutMs = 120000 } = 
   });
 
   const served = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    rejectServed = reject;
+    timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       server.close();
@@ -34,6 +44,16 @@ export function listenForOnePeer({ passphrase, roomCode, timeoutMs = 120000 } = 
         socket.destroy();
         return;
       }
+      // An unauthenticated peer forces an expensive scrypt (the sharer must derive the session key to
+      // check the peer's proof). Cap concurrent handshakes so a connection flood cannot pile up unbounded
+      // pre-auth CPU work, and give each handshake a hard deadline so a peer that connects then stalls
+      // (or drips bytes) is dropped instead of holding a slot — then keep listening for the right peer.
+      if (inFlight >= maxConcurrentHandshakes) {
+        socket.destroy();
+        return;
+      }
+      inFlight++;
+      const hsTimer = setTimeout(() => socket.destroy(), handshakeTimeoutMs);
       try {
         await payloadReady; // the payload is handed in via send(); wait for it before serving
         await sharerServe(socket, { passphrase, roomCode, capsulePlain });
@@ -48,8 +68,11 @@ export function listenForOnePeer({ passphrase, roomCode, timeoutMs = 120000 } = 
           resolve({ peerAddress: socket.remoteAddress });
         });
       } catch {
-        // unauthenticated, malformed, or oversized — refuse THIS peer and keep listening for the right one
+        // unauthenticated, malformed, oversized, or timed out — refuse THIS peer and keep listening
         socket.destroy();
+      } finally {
+        clearTimeout(hsTimer);
+        inFlight--;
       }
     });
   });
@@ -62,6 +85,13 @@ export function listenForOnePeer({ passphrase, roomCode, timeoutMs = 120000 } = 
       return served;
     },
     stop() {
+      // Clean shutdown: cancel the pending timeout (so a stopped sharer leaves no timer keeping the
+      // process alive) and settle `served` if no peer ever completed, rather than leaving it hanging.
+      if (!settled) {
+        settled = true;
+        if (timer) clearTimeout(timer);
+        rejectServed?.(new Error("sharer stopped before an authenticated peer connected"));
+      }
       server.close();
     },
   };
