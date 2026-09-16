@@ -44,3 +44,34 @@ export function decrypt(blob, passphrase) {
 export function roomHash(roomCode) {
   return crypto.createHash("sha256").update(roomCode).digest("hex").slice(0, 16);
 }
+
+// ── authenticated-transport primitives (v2) ─────────────────────────────────────────────────────
+// The transport binds the CREDENTIAL and the HANDSHAKE together: the secret only ever travels as ONE
+// sealed CAPSULE, keyed by a session key that is derived from BOTH an ephemeral key agreement AND the
+// passphrase (see handshake.js). No unauthenticated peer can open it, and none is ever handed it.
+
+// scrypt over a room-bound salt → the passphrase key that is mixed into the session key. Same hardening
+// (N=16384) the payload encryption uses, so a captured capsule is no cheaper to attack than the blob.
+export function passphraseKey(passphrase, roomCode) {
+  return crypto.scryptSync(passphrase, Buffer.from(roomHash(roomCode), "utf8"), KEY_LEN, SCRYPT_OPTS);
+}
+
+// Seal one capsule under the raw session key. Wire: iv(12) || tag(16) || ciphertext.
+export function sealCapsule(sessionKey, data) {
+  const iv = crypto.randomBytes(IV_LEN);
+  const cipher = crypto.createCipheriv("aes-256-gcm", sessionKey, iv);
+  const ct = Buffer.concat([cipher.update(data), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), ct]);
+}
+
+// Open a capsule. Throws (GCM auth) on the wrong session key — i.e. a wrong passphrase or an impostor
+// peer — which is the honest answer and, wrapped by the caller, reads as a "could not decrypt" failure.
+export function openCapsule(sessionKey, capsule) {
+  if (capsule.length < IV_LEN + TAG_LEN) throw new Error("capsule too short to be valid");
+  const iv = capsule.subarray(0, IV_LEN);
+  const tag = capsule.subarray(IV_LEN, IV_LEN + TAG_LEN);
+  const ct = capsule.subarray(IV_LEN + TAG_LEN);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", sessionKey, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ct), decipher.final()]);
+}

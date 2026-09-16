@@ -22,13 +22,12 @@ test("a real sender and receiver find each other and transfer the exact real pla
 
 test("a real receiver with the wrong passphrase fails honestly, not with garbage text", async () => {
   const roomCode = `test-${crypto.randomBytes(4).toString("hex")}`;
-  await assert.rejects(
-    Promise.all([
-      shareEnv({ envText: "secret", roomCode, passphrase: "the real one" }),
-      receiveEnv({ roomCode, passphrase: "the wrong one" }),
-    ]),
-    /decrypt/i
-  );
+  // The sharer now REFUSES a peer that can't prove the passphrase and keeps listening (it never blindly
+  // hands the capsule to a racer) — so give it a short window and swallow its timeout while we assert the
+  // receiver fails with an honest decrypt error. Same intent as before, stronger behaviour underneath.
+  const share = shareEnv({ envText: "secret", roomCode, passphrase: "the real one", timeoutMs: 3000 }).catch(() => {});
+  await assert.rejects(receiveEnv({ roomCode, passphrase: "the wrong one" }), /decrypt/i);
+  await share;
 });
 
 test("receiveEnv times out honestly when no real peer ever announces", async () => {

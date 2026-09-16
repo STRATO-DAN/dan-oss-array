@@ -6,7 +6,7 @@ import { listenForOnePeer, fetchOnce } from "./peer.js";
 
 export async function shareEnv({ envText, roomCode, passphrase, timeoutMs = 120000 }) {
   const payload = encrypt(envText, passphrase);
-  const peer = listenForOnePeer({ timeoutMs });
+  const peer = listenForOnePeer({ passphrase, roomCode, timeoutMs });
   const tcpPort = await peer.ready;
   const announcer = startAnnouncing({ roomCode, tcpPort });
   try {
@@ -33,12 +33,14 @@ export async function receiveEnv({ roomCode, passphrase, timeoutMs = 30000 }) {
     });
   });
 
-  const blob = await fetchOnce({ address: found.address, port: found.tcpPort });
   let envText;
   try {
+    // fetchOnce runs the authenticated handshake and returns the OPENED capsule (the encrypted blob);
+    // a wrong passphrase fails the capsule open here, an impostor peer likewise — both honest failures.
+    const blob = await fetchOnce({ address: found.address, port: found.tcpPort, passphrase, roomCode });
     envText = decrypt(blob, passphrase);
   } catch {
-    throw new Error("Could not decrypt the received data — wrong passphrase, or the payload was corrupted in transit.");
+    throw new Error("Could not decrypt the received data — wrong passphrase, no authorised peer answered, or the payload was corrupted in transit.");
   }
   return { ok: true, envText, fromAddress: found.address };
 }
