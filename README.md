@@ -76,11 +76,26 @@ they find each other directly.
   racing LAN host can no longer steal the ciphertext or deny the real receiver. Honest residual: an
   *active* impostor that lures a receiver and wins its discovery race obtains one transcript MAC it
   can attack offline against the passphrase (scrypt-hardened) — it yields a passphrase guess, never a
-  past session's payload. For higher assurance, use the advanced tier.
+  past session's payload.
+  - **Why this residual exists, and what removes it.** The residual is inherent to authenticating with
+    a shared passphrase and no PKI: the handshake produces a transcript MAC an active impostor can grind
+    *offline*, so a low-entropy passphrase is only as safe as scrypt makes it slow. The construction that
+    removes this class outright is a **PAKE** (password-authenticated key exchange): a PAKE is designed so
+    a wrong guess simply aborts the session, leaving the attacker exactly **one online guess per attempt**
+    and **no offline-attackable transcript at all** — the exchange yields nothing a captured session can
+    grind later, which is what makes even a short code safe. Adopting a PAKE for the handshake is the
+    concrete path to a higher-assurance tier; the current basic tier deliberately keeps the simpler
+    passphrase+scrypt binding and states this limit honestly instead.
+  - **Handshake assurance and network reach are two independent axes.** A PAKE upgrade would strengthen
+    *who you're talking to*; it would not change the LAN-only limit above. Reaching a peer across NAT or
+    the internet needs a brokering relay — the central dependency this tool trades away on purpose — so a
+    higher-assurance handshake and cross-network reach are separate decisions, not one bundled step.
 - **This secures the wire, not the endpoints.** It removes the central-server leak risk — it does
   not protect either machine from its own compromise.
 - Nothing is ever written to disk by this tool. The `.env` text lives in the browser tab and the
-  Node process's memory only, for the life of the transfer.
+  Node process's memory only, for the life of the transfer. The room code and passphrase are entered
+  in the UI and never passed as a command-line argument — a secret in a process's argument list is
+  visible to any other user on the machine (e.g. via the process list), so it stays out of argv.
 
 ## Basic tier vs. the advanced tier
 
