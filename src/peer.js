@@ -1,14 +1,19 @@
-// [DAN] ARRAY — real, direct peer-to-peer transfer. A one-shot TCP server sends the already-
-// encrypted payload to exactly one connecting peer, then closes — never a long-running service,
-// never a relay, never anything but this machine talking directly to the one that connects.
+// [DAN] ARRAY — real, direct peer-to-peer transfer, now AUTHENTICATED. A one-shot TCP server hands the
+// sealed credential capsule to exactly one peer that has PROVEN the passphrase (see handshake.js), then
+// closes — never a relay, never a service. A peer that cannot authenticate is refused and the server
+// keeps waiting for the right one, so a racing LAN host can neither steal the capsule nor deny the real
+// receiver.
 import net from "node:net";
+import { sharerServe, receiverFetch } from "./handshake.js";
 
-// Two real steps, not one call: the caller needs the bound port (to announce it over UDP) before
-// a peer has connected, and needs to hand over the payload only once discovery has happened — so
-// binding and sending are split rather than folded into a single all-at-once function.
-export function listenForOnePeer({ timeoutMs = 120000 } = {}) {
+export function listenForOnePeer({ passphrase, roomCode, timeoutMs = 120000 } = {}) {
   const server = net.createServer();
-  let onConnection = null;
+  let settled = false;
+  let capsulePlain = null;
+  let payloadResolve = null;
+  const payloadReady = new Promise((resolve) => {
+    payloadResolve = resolve;
+  });
 
   const ready = new Promise((resolve, reject) => {
     server.on("error", reject);
@@ -16,31 +21,44 @@ export function listenForOnePeer({ timeoutMs = 120000 } = {}) {
   });
 
   const served = new Promise((resolve, reject) => {
-    let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       server.close();
-      reject(new Error("No peer connected within the time window — nothing was sent."));
+      reject(new Error("No authenticated peer connected within the time window — nothing was sent."));
     }, timeoutMs);
 
-    onConnection = (payload) => {
-      server.on("connection", (socket) => {
-        if (settled) { socket.destroy(); return; }
+    server.on("connection", async (socket) => {
+      socket.on("error", () => {}); // a peer that hangs up mid-handshake is not our failure
+      if (settled) {
+        socket.destroy();
+        return;
+      }
+      try {
+        await payloadReady; // the payload is handed in via send(); wait for it before serving
+        await sharerServe(socket, { passphrase, roomCode, capsulePlain });
+        if (settled) {
+          socket.destroy();
+          return;
+        }
         settled = true;
         clearTimeout(timer);
-        socket.end(payload, () => {
+        socket.end(() => {
           server.close();
           resolve({ peerAddress: socket.remoteAddress });
         });
-      });
-    };
+      } catch {
+        // unauthenticated, malformed, or oversized — refuse THIS peer and keep listening for the right one
+        socket.destroy();
+      }
+    });
   });
 
   return {
     ready,
     send(payload) {
-      onConnection(payload);
+      capsulePlain = payload;
+      payloadResolve();
       return served;
     },
     stop() {
@@ -49,31 +67,27 @@ export function listenForOnePeer({ timeoutMs = 120000 } = {}) {
   };
 }
 
-export function fetchOnce({ address, port, timeoutMs = 15000 }) {
+export function fetchOnce({ address, port, passphrase, roomCode, timeoutMs = 15000 }) {
   return new Promise((resolve, reject) => {
     let settled = false;
-    const chunks = [];
     const socket = net.createConnection({ host: address, port });
+    const timer = setTimeout(() => finish(reject, new Error("Connection to the peer timed out.")), timeoutMs);
 
-    const timer = setTimeout(() => {
+    function finish(fn, value) {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       socket.destroy();
-      reject(new Error("Connection to the peer timed out."));
-    }, timeoutMs);
+      fn(value);
+    }
 
-    socket.on("data", (chunk) => chunks.push(chunk));
-    socket.on("end", () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(Buffer.concat(chunks));
+    socket.on("connect", async () => {
+      try {
+        finish(resolve, await receiverFetch(socket, { passphrase, roomCode }));
+      } catch (err) {
+        finish(reject, err);
+      }
     });
-    socket.on("error", (err) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(err);
-    });
+    socket.on("error", (err) => finish(reject, err));
   });
 }

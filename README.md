@@ -47,9 +47,12 @@ itself), click **Broadcast & wait for peer**.
 2. Sender broadcasts a UDP announcement on the local network: "a room with this hash exists,
    connect to me on this port" — the room code itself never goes on the wire, only its hash
 3. Receiver, listening for that same hash, connects DIRECTLY to the sender over TCP
-4. Sender streams the encrypted payload to that one connection, then closes — one peer, one
-   transfer, no relay
-5. Receiver decrypts locally with the passphrase
+4. The two run an authenticated handshake: a fresh X25519 key agreement whose session key is bound to
+   BOTH the exchange AND the passphrase, and the receiver proves the passphrase before anything is
+   sent. The sender refuses a peer that can't prove it and keeps waiting for the right one.
+5. Sender hands over ONE sealed capsule (the credential, encrypted under that session key), then
+   closes — one authenticated peer, one transfer, no relay
+6. Receiver opens the capsule and decrypts locally with the passphrase
 ```
 
 No cloud service, no relay server, no account. If both machines are on the same LAN/Wi-Fi network,
@@ -63,12 +66,17 @@ they find each other directly.
 - **Same network only.** UDP broadcast discovery works within one LAN/Wi-Fi broadcast domain. It
   does not cross the public internet or a NAT boundary — that would need a relay, which is exactly
   the central point of failure this tool exists to avoid.
-- **The passphrase is the only protection.** A weak passphrase is a weak passphrase — scrypt makes
-  brute-forcing expensive, not impossible. Use a real, shared secret, not `password123`.
-- **First peer to connect wins.** The sender streams the encrypted blob to the first TCP peer that
-  connects, so any host on the LAN that knows the out-of-band room code can win that race and
-  receive the ciphertext — confidentiality still rests entirely on the scrypt + AES-256-GCM
-  passphrase (the only protection, above).
+- **The passphrase still matters.** The transfer now rides an ephemeral X25519 session key bound to
+  the passphrase, so a captured session can't be opened without the ephemeral secret — but a weak
+  passphrase is still a weak passphrase. scrypt makes brute-forcing expensive, not impossible; use a
+  real shared secret, not `password123`.
+- **The receiver is authenticated (v0.2).** The sender no longer streams the blob to the first peer
+  that connects — the peer must prove the passphrase (bound to a fresh key agreement) before the
+  sealed capsule is sent, and an unproven peer is refused while the sender waits for the right one. A
+  racing LAN host can no longer steal the ciphertext or deny the real receiver. Honest residual: an
+  *active* impostor that lures a receiver and wins its discovery race obtains one transcript MAC it
+  can attack offline against the passphrase (scrypt-hardened) — it yields a passphrase guess, never a
+  past session's payload. For higher assurance, use the advanced tier.
 - **This secures the wire, not the endpoints.** It removes the central-server leak risk — it does
   not protect either machine from its own compromise.
 - Nothing is ever written to disk by this tool. The `.env` text lives in the browser tab and the
