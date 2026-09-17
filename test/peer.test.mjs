@@ -35,6 +35,29 @@ test("liveness: a peer that stalls the handshake is dropped at the deadline, and
   await served; // the sharer settled on the real peer, not the stalled one
 });
 
+test("A1: only ONE of two simultaneous authenticated peers is ever served the capsule (exactly-one contract)", async () => {
+  const roomCode = "room-exactly-one";
+  const passphrase = "the shared secret";
+  const plain = Buffer.from("BLOB:only-once");
+
+  const sharer = listenForOnePeer({ passphrase, roomCode, handshakeTimeoutMs: 5000, maxConcurrentHandshakes: 4 });
+  const port = await sharer.ready;
+  const served = sharer.send(plain);
+
+  // Two fully-authenticated receivers race at the same instant. Both know the passphrase, both complete
+  // the handshake — but the sharer must hand the capsule to EXACTLY ONE. Before the fix, the capsule was
+  // written before the caller re-checked `settled`, so both could open it.
+  const results = await Promise.allSettled([
+    fetchOnce({ address: "127.0.0.1", port, passphrase, roomCode }),
+    fetchOnce({ address: "127.0.0.1", port, passphrase, roomCode }),
+  ]);
+  const opened = results.filter((r) => r.status === "fulfilled");
+  assert.equal(opened.length, 1, "exactly one authenticated peer opens the capsule — never both");
+  assert.deepEqual(opened[0].value, plain, "the one served peer gets the real credential bytes");
+
+  await served; // the sharer settled on the single served peer
+});
+
 test("liveness: extra connections beyond the concurrency cap are dropped, not queued as unbounded scrypt work", async () => {
   const roomCode = "room-cap";
   const passphrase = "the shared secret";

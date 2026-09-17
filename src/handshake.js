@@ -3,14 +3,16 @@
 // race got the ciphertext (and could deny the real receiver). This layer fixes that WITHOUT adding a
 // dependency — everything here is Node's own `crypto`.
 //
-//   • Ephemeral X25519 per transfer → a fresh key agreement (forward secrecy). The session key is
-//     HKDF(sharedSecret ‖ scrypt(passphrase, roomHash), transcript) — it needs BOTH the ephemeral
-//     secret AND the passphrase, so knowing one is useless.
-//   • The RECEIVER proves the passphrase FIRST (a MAC over the transcript). The sharer verifies it
-//     before releasing anything, so an unauthenticated racer is refused and the sharer keeps waiting
-//     for the right peer — the credential is never sent to a peer that hasn't proven the passphrase.
-//   • The credential travels as ONE sealed CAPSULE keyed by that same session key — credential and
-//     handshake bound together, not a separate plaintext-keyed step. A wrong passphrase (or an
+//   • Ephemeral X25519 per transfer → a fresh key agreement (forward secrecy). The IKM is
+//     sharedSecret ‖ scrypt(passphrase, per-session salt); two domain-separated HKDF labels over it give
+//     an independent capsule-encryption key and confirmation-MAC key. It needs BOTH the ephemeral secret
+//     AND the passphrase, so knowing one is useless. The scrypt salt binds the per-session handshake
+//     transcript (not the public, broadcast roomHash), so the passphrase key is unique per session.
+//   • The RECEIVER proves the passphrase FIRST (a MAC over the transcript, under its own MAC key). The
+//     sharer verifies it before releasing anything, so an unauthenticated racer is refused and the sharer
+//     keeps waiting for the right peer — the credential is never sent to a peer that hasn't proven it.
+//   • The credential travels as ONE sealed CAPSULE keyed by the capsule-encryption subkey — credential
+//     and handshake bound together, not a separate plaintext-keyed step. A wrong passphrase (or an
 //     impostor sharer) yields a capsule that will not open.
 //   • Every frame is length-prefixed and hard-capped, and total received bytes are capped — so the
 //     receive path can no longer be made to buffer without bound.
@@ -20,12 +22,11 @@
 // scrypt (N=16384) makes that costly, and it yields a passphrase guess, never the payload of a past
 // session (that rode an ephemeral key the attacker never had). Higher assurance = the advanced tier.
 import crypto from "node:crypto";
-import { passphraseKeyAsync, sealCapsule, openCapsule } from "./crypto.js";
+import { passphraseKeyAsync, sealCapsule, openCapsule, deriveSessionKeys } from "./crypto.js";
 
 const HS_FRAME_CAP = 8 * 1024; // hello/confirm frames are tiny — this is generous
 export const CAPSULE_CAP = 4 * 1024 * 1024; // an env file is small; this bounds one sealed capsule
 const TOTAL_CAP = CAPSULE_CAP + 64 * 1024; // hard cap on everything a peer may ever send us
-const HKDF_INFO = Buffer.from("dan-oss-array/v2 session");
 const T_RECEIVER = Buffer.from("confirm-receiver");
 
 function u32(n) {
@@ -114,25 +115,33 @@ function ephemeral() {
 async function session(privateKey, peerPubDer, pubR, pubS, passphrase, roomCode) {
   const peer = crypto.createPublicKey({ key: peerPubDer, type: "spki", format: "der" });
   const shared = crypto.diffieHellman({ privateKey, publicKey: peer });
-  const pk = await passphraseKeyAsync(passphrase, roomCode); // async → does not block the event loop
   const transcript = Buffer.concat([pubR, pubS]);
-  const sk = Buffer.from(crypto.hkdfSync("sha256", Buffer.concat([shared, pk]), transcript, HKDF_INFO, 32));
-  const confirmR = crypto.createHmac("sha256", sk).update(Buffer.concat([T_RECEIVER, transcript])).digest();
-  return { sk, confirmR };
+  const pk = await passphraseKeyAsync(passphrase, roomCode, transcript); // per-session salt; async, non-blocking
+  // Domain-separated subkeys: kEnc seals the capsule, kMac keys the in-the-clear confirmation MAC — never
+  // the same key for both. Both sides derive the same IKM + transcript, so both compute the same pair.
+  const { kEnc, kMac } = deriveSessionKeys(Buffer.concat([shared, pk]), transcript);
+  const confirmR = crypto.createHmac("sha256", kMac).update(Buffer.concat([T_RECEIVER, transcript])).digest();
+  return { kEnc, confirmR };
 }
 
 // SHARER side of an inbound connection. Verifies the receiver knows the passphrase (bound to THIS key
 // agreement) BEFORE releasing anything, then hands over exactly one sealed capsule. Throws if the peer
 // cannot authenticate — the caller destroys that socket and keeps listening for the right peer.
-export async function sharerServe(socket, { passphrase, roomCode, capsulePlain }) {
+export async function sharerServe(socket, { passphrase, roomCode, capsulePlain, claim }) {
   const read = frameReader(socket);
   const me = ephemeral();
   const pubR = await read(); // HELLO from the receiver
   writeFrame(socket, me.pub); // HELLO back
-  const { sk, confirmR } = await session(me.privateKey, pubR, pubR, me.pub, passphrase, roomCode);
+  const { kEnc, confirmR } = await session(me.privateKey, pubR, pubR, me.pub, passphrase, roomCode);
   const got = await read(); // the receiver's passphrase proof
   if (!equal(got, confirmR)) throw new Error("peer did not prove the passphrase — refused");
-  writeFrame(socket, sealCapsule(sk, capsulePlain)); // the credential, sealed under the authenticated session
+  // Claim the single-serve slot ATOMICALLY — synchronously, with no await between the claim and the
+  // write — right before the capsule touches the wire. If another authenticated peer already won the
+  // slot, refuse WITHOUT writing, so two peers that finish their handshakes simultaneously can never
+  // both be handed the capsule (the "exactly one peer" contract). With no claim (direct callers/tests)
+  // the behaviour is unchanged.
+  if (claim && !claim()) throw new Error("another peer was already served — refused");
+  writeFrame(socket, sealCapsule(kEnc, capsulePlain)); // the credential, sealed under the authenticated session
 }
 
 // RECEIVER side. Connects, proves the passphrase, opens the one sealed capsule. A wrong passphrase (or
@@ -143,8 +152,8 @@ export async function receiverFetch(socket, { passphrase, roomCode }) {
   const me = ephemeral();
   writeFrame(socket, me.pub); // HELLO
   const pubS = await read(); // HELLO from the sharer
-  const { sk, confirmR } = await session(me.privateKey, pubS, me.pub, pubS, passphrase, roomCode);
+  const { kEnc, confirmR } = await session(me.privateKey, pubS, me.pub, pubS, passphrase, roomCode);
   writeFrame(socket, confirmR); // prove the passphrase first
   const capsule = await read(CAPSULE_CAP + 64); // the sealed credential
-  return openCapsule(sk, capsule); // throws on a wrong session key (wrong passphrase / impostor)
+  return openCapsule(kEnc, capsule); // throws on a wrong session key (wrong passphrase / impostor)
 }

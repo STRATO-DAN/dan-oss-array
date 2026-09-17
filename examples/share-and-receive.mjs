@@ -25,13 +25,15 @@ console.log("Sender result:", sendResult);
 console.log("Receiver result:", { ...receiveResult, envText: receiveResult.envText.length + " chars" });
 console.log("\nReceived text matches what was sent:", receiveResult.envText === envText);
 
-// A real, honest failure case: wrong passphrase never silently "succeeds" with garbage.
+// A real, honest failure case: wrong passphrase never silently "succeeds" with garbage. The sharer
+// refuses the unproven peer and keeps listening, and the receiver keeps trying announcers until its
+// window closes — so both are given a short, explicit window here to demonstrate the honest failure.
 console.log("\nNow trying with a WRONG passphrase — should fail loudly, not decrypt garbage:");
 const wrongRoomCode = `example-${crypto.randomBytes(4).toString("hex")}`;
 try {
   await Promise.all([
-    shareEnv({ envText, roomCode: wrongRoomCode, passphrase }),
-    receiveEnv({ roomCode: wrongRoomCode, passphrase: "the wrong passphrase entirely" }),
+    shareEnv({ envText, roomCode: wrongRoomCode, passphrase, timeoutMs: 3000 }),
+    receiveEnv({ roomCode: wrongRoomCode, passphrase: "the wrong passphrase entirely", timeoutMs: 3000 }),
   ]);
 } catch (err) {
   console.log("Failed as expected:", err.message);
