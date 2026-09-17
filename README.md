@@ -90,6 +90,27 @@ they find each other directly.
     *who you're talking to*; it would not change the LAN-only limit above. Reaching a peer across NAT or
     the internet needs a brokering relay — the central dependency this tool trades away on purpose — so a
     higher-assurance handshake and cross-network reach are separate decisions, not one bundled step.
+- **Discovery is unauthenticated, but a spoofer can't deny the transfer.** Any LAN host can broadcast a
+  matching announcement — discovery carries only the room-code *hash* and a TCP port, and nothing signs
+  it. A spoofing host can therefore point a receiver at the wrong TCP endpoint. It gains nothing from
+  doing so (that endpoint still has to pass the authenticated handshake, which it can't), and as of v0.3
+  it can no longer *deny* the transfer either: the receiver keeps listening and tries each distinct
+  announcer in turn instead of committing to the first one. Flooding the discovery port to drown out the
+  real announcer is a denial-of-service, which `SECURITY.md` explicitly de-scopes.
+- **The sharer is a bounded online passphrase oracle during its window.** While it is listening, each
+  connecting peer gets exactly one attempt to prove the passphrase, so an attacker on the LAN can make
+  online guesses for as long as the window stays open. This is throttled, not unthrottled: every attempt
+  costs a full X25519 handshake and a deliberately slow scrypt derivation (N=16384), concurrent handshakes
+  are capped, and the window is finite (2 minutes by default) — a few hundred guesses total against a
+  real passphrase, which is why passphrase entropy is what matters. A *hard* per-window attempt cap is
+  deliberately **not** added: an unauthenticated attacker could trip it on purpose to lock out the real
+  receiver, turning a weak throttle into a reliable denial-of-service lever — and DoS is out of scope per
+  `SECURITY.md`. Use a real shared secret and keep the window short.
+- **The local UI server is loopback-only and cross-origin-guarded.** The bundled HTTP server binds
+  `127.0.0.1` only, refuses any request whose `Host` isn't loopback (so a web page can't DNS-rebind a
+  hostname to `127.0.0.1` and drive it), and refuses any request carrying a non-loopback browser `Origin`
+  (so a cross-origin page can't CSRF the local share/receive API). A determined attacker who can already
+  send raw packets to the loopback port to disrupt it is a denial-of-service, de-scoped per `SECURITY.md`.
 - **This secures the wire, not the endpoints.** It removes the central-server leak risk — it does
   not protect either machine from its own compromise.
 - Nothing is ever written to disk by this tool. The `.env` text lives in the browser tab and the

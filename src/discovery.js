@@ -35,16 +35,23 @@ export function startAnnouncing({ roomCode, tcpPort, intervalMs = ANNOUNCE_INTER
   };
 }
 
-// Listens for announce packets matching this room's hash, reporting the announcer's real address
-// and TCP port the first time a match arrives. Ignores every other broadcast on the LAN silently
-// — a shared network carries plenty of unrelated traffic, and that isn't this tool's concern.
-export function startListening({ roomCode, onFound }) {
+// Listens for announce packets matching this room's hash, reporting the announcer's real address and
+// TCP port. Ignores every other broadcast on the LAN silently — a shared network carries plenty of
+// unrelated traffic, and that isn't this tool's concern.
+//
+//   • once: true  (default) — latch onto the FIRST match and report it exactly once.
+//   • once: false          — report EVERY distinct announcer (deduped by address:port) so a caller can
+//                            try the next one when the first fails to complete the handshake. This is
+//                            what lets the receiver survive a spoofing LAN host that wins the discovery
+//                            race with a bogus announcement instead of committing to it (see sync.js).
+export function startListening({ roomCode, onFound, once = true }) {
   const hash = roomHash(roomCode);
   const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
   let found = false;
+  const seen = new Set(); // dedupe announcers by address:port when reporting every distinct one
 
   socket.on("message", (msg, rinfo) => {
-    if (found) return;
+    if (found) return; // latch-once mode stops after the first match
     let data;
     try {
       data = JSON.parse(msg.toString("utf8"));
@@ -52,7 +59,14 @@ export function startListening({ roomCode, onFound }) {
       return;
     }
     if (data.app === "dan-oss-array" && data.v === 1 && data.roomHash === hash && Number.isInteger(data.tcpPort)) {
-      found = true;
+      if (once) {
+        found = true;
+        onFound({ address: rinfo.address, tcpPort: data.tcpPort });
+        return;
+      }
+      const key = `${rinfo.address}:${data.tcpPort}`;
+      if (seen.has(key)) return; // the same announcer re-broadcasting every interval — report it once
+      seen.add(key);
       onFound({ address: rinfo.address, tcpPort: data.tcpPort });
     }
   });

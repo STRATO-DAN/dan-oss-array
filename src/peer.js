@@ -56,19 +56,28 @@ export function listenForOnePeer({
       const hsTimer = setTimeout(() => socket.destroy(), handshakeTimeoutMs);
       try {
         await payloadReady; // the payload is handed in via send(); wait for it before serving
-        await sharerServe(socket, { passphrase, roomCode, capsulePlain });
-        if (settled) {
-          socket.destroy();
-          return;
-        }
-        settled = true;
-        clearTimeout(timer);
+        // `claim` runs synchronously inside sharerServe, immediately before the capsule is written, and
+        // atomically decides whether THIS connection is the one served. The FIRST authenticated peer to
+        // reach it wins; any other peer that finishes its handshake is refused before the capsule reaches
+        // the wire — so the "exactly one peer" contract holds even when two authenticated peers race.
+        await sharerServe(socket, {
+          passphrase,
+          roomCode,
+          capsulePlain,
+          claim: () => {
+            if (settled) return false;
+            settled = true;
+            clearTimeout(timer);
+            return true;
+          },
+        });
         socket.end(() => {
           server.close();
           resolve({ peerAddress: socket.remoteAddress });
         });
       } catch {
-        // unauthenticated, malformed, oversized, or timed out — refuse THIS peer and keep listening
+        // unauthenticated, malformed, oversized, timed out, or lost the single-serve race — refuse THIS
+        // peer and keep listening (unless another peer already settled the transfer)
         socket.destroy();
       } finally {
         clearTimeout(hsTimer);

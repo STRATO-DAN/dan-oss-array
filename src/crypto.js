@@ -13,16 +13,20 @@ const TAG_LEN = 16;
 const KEY_LEN = 32;
 const SCRYPT_OPTS = { N: 16384, r: 8, p: 1 };
 
-function deriveKey(passphrase, salt) {
-  return crypto.scryptSync(passphrase, salt, KEY_LEN, SCRYPT_OPTS);
+// scrypt at N=16384 is deliberately slow; the SYNC version blocks Node's single event-loop thread for
+// its full duration, freezing every other socket and timer. This derivation now runs on the libuv
+// threadpool (async scrypt) — the payload path matches the handshake path, which was moved async in
+// 0.2.1. The wire format is unchanged, so a blob is byte-for-byte compatible with the previous release.
+async function deriveKey(passphrase, salt) {
+  return scrypt(passphrase, salt, KEY_LEN, SCRYPT_OPTS);
 }
 
 // Wire format: salt(16) || iv(12) || tag(16) || ciphertext. Self-contained — the receiver needs
-// nothing but this buffer and the passphrase to decrypt.
-export function encrypt(plaintext, passphrase) {
+// nothing but this buffer and the passphrase to decrypt. Async so scrypt never blocks the event loop.
+export async function encrypt(plaintext, passphrase) {
   const salt = crypto.randomBytes(SALT_LEN);
   const iv = crypto.randomBytes(IV_LEN);
-  const key = deriveKey(passphrase, salt);
+  const key = await deriveKey(passphrase, salt);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -31,13 +35,13 @@ export function encrypt(plaintext, passphrase) {
 
 // Throws on a wrong passphrase or corrupted data — GCM's auth tag makes tampering and a wrong
 // key indistinguishable from "invalid", which is the honest answer in both cases.
-export function decrypt(blob, passphrase) {
+export async function decrypt(blob, passphrase) {
   if (blob.length < SALT_LEN + IV_LEN + TAG_LEN) throw new Error("payload too short to be valid");
   const salt = blob.subarray(0, SALT_LEN);
   const iv = blob.subarray(SALT_LEN, SALT_LEN + IV_LEN);
   const tag = blob.subarray(SALT_LEN + IV_LEN, SALT_LEN + IV_LEN + TAG_LEN);
   const ciphertext = blob.subarray(SALT_LEN + IV_LEN + TAG_LEN);
-  const key = deriveKey(passphrase, salt);
+  const key = await deriveKey(passphrase, salt);
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
   decipher.setAuthTag(tag);
   const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
@@ -53,10 +57,22 @@ export function roomHash(roomCode) {
 // sealed CAPSULE, keyed by a session key that is derived from BOTH an ephemeral key agreement AND the
 // passphrase (see handshake.js). No unauthenticated peer can open it, and none is ever handed it.
 
-// scrypt over a room-bound salt → the passphrase key that is mixed into the session key. Same hardening
-// (N=16384) the payload encryption uses, so a captured capsule is no cheaper to attack than the blob.
-export function passphraseKey(passphrase, roomCode) {
-  return crypto.scryptSync(passphrase, Buffer.from(roomHash(roomCode), "utf8"), KEY_LEN, SCRYPT_OPTS);
+// Per-session scrypt salt for the passphrase KDF. roomHash alone is a PUBLIC constant — it is broadcast
+// on the LAN in every announce packet — so using it as the sole salt made the derived passphrase key
+// IDENTICAL across every session in a room, letting an offline guessing effort be amortised across all
+// of them. Folding in the per-session handshake transcript (the exchanged ephemeral public keys, which
+// both sides already share) makes the salt unique per handshake without exchanging anything extra. Both
+// peers pass the SAME transcript in the SAME order, so both still derive the same key — interop holds.
+function kdfSalt(roomCode, transcript) {
+  const h = crypto.createHash("sha256").update(Buffer.from(roomHash(roomCode), "utf8"));
+  if (transcript) h.update(transcript);
+  return h.digest();
+}
+
+// scrypt over the per-session salt → the passphrase key that is mixed into the session key. Same
+// hardening (N=16384) the payload encryption uses, so a captured capsule is no cheaper to attack.
+export function passphraseKey(passphrase, roomCode, transcript) {
+  return crypto.scryptSync(passphrase, kdfSalt(roomCode, transcript), KEY_LEN, SCRYPT_OPTS);
 }
 
 // Async twin of passphraseKey, used by the handshake. scrypt is deliberately expensive (N=16384); the
@@ -64,8 +80,21 @@ export function passphraseKey(passphrase, roomCode) {
 // that merely connects (the sharer must derive this key to check the peer's proof) could stall the whole
 // process — a cheap denial-of-service that needs no valid passphrase. The async version runs on the
 // libuv threadpool, so one handshake's key derivation no longer freezes every other socket and timer.
-export async function passphraseKeyAsync(passphrase, roomCode) {
-  return scrypt(passphrase, Buffer.from(roomHash(roomCode), "utf8"), KEY_LEN, SCRYPT_OPTS);
+export async function passphraseKeyAsync(passphrase, roomCode, transcript) {
+  return scrypt(passphrase, kdfSalt(roomCode, transcript), KEY_LEN, SCRYPT_OPTS);
+}
+
+// Domain-separated session subkeys from one shared IKM (the ECDH secret ‖ the passphrase key). Two
+// distinct HKDF `info` labels yield INDEPENDENT keys for the capsule cipher and the handshake
+// confirmation MAC — so the MAC that travels in the clear during the handshake shares no key material
+// with the capsule encryption (previously a single session key served as both roles). Both peers derive
+// the same IKM and transcript, so both compute the same pair — interop preserved.
+const HKDF_ENC = Buffer.from("dan-oss-array/v2 capsule-enc");
+const HKDF_MAC = Buffer.from("dan-oss-array/v2 confirm-mac");
+export function deriveSessionKeys(ikm, transcript) {
+  const kEnc = Buffer.from(crypto.hkdfSync("sha256", ikm, transcript, HKDF_ENC, KEY_LEN));
+  const kMac = Buffer.from(crypto.hkdfSync("sha256", ikm, transcript, HKDF_MAC, KEY_LEN));
+  return { kEnc, kMac };
 }
 
 // Seal one capsule under the raw session key. Wire: iv(12) || tag(16) || ciphertext.
