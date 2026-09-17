@@ -146,5 +146,15 @@ export function createServer() {
 
 export function listen(port) {
   const server = createServer();
-  return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve(server)));
+  return new Promise((resolve, reject) => {
+    // Reject (rather than let the server emit an unhandled 'error' that crashes the process with a
+    // raw stack) so the caller can report a startup failure honestly — e.g. EADDRINUSE when the port
+    // is already in use. The error listener is removed once binding succeeds so it can't later fire.
+    const onError = (err) => reject(err);
+    server.once("error", onError);
+    server.listen(port, "127.0.0.1", () => {
+      server.removeListener("error", onError);
+      resolve(server);
+    });
+  });
 }

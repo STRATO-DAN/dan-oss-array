@@ -3,6 +3,36 @@
 All notable changes to `@strato-dan/array` are documented here.
 This project uses [semantic versioning](https://semver.org/).
 
+## [0.4.0] — 2026-09-17
+
+Cross-cutting polish. Purely additive — no change to existing routes, the wire format, or the
+crypto. Still zero runtime dependencies (Node standard library only).
+
+### Added
+
+- **Launcher flags (hand-rolled, no dependency).** `dan-oss-array` now accepts `--version` (prints
+  the version, exit 0), `--help` (usage, environment variables including `DAN_OSS_ARRAY_PORT`, and
+  the exit-code contract, exit 0), and `--json` (prints the startup banner as one JSON object
+  `{url,port,mode,encryption}` for scripting/CI). The human-readable banner remains the default and
+  is unchanged.
+- **Honest startup-failure exit codes.** A startup failure (e.g. the port is already in use,
+  `EADDRINUSE`) now prints a single line to stderr and exits non-zero (`1`) instead of dumping a raw
+  stack trace. An unknown flag exits `2`. The `0`/`1`/`2` contract is documented in `--help` and the
+  README.
+- **`Makefile` with `make help`.** `make test` (full suite), `make attack` (runs only the existing
+  adversarial/security suites and shows they reject), `make demo` (reproducible crypto-core
+  seal/open plus wrong-passphrase and tamper failures — no LAN needed), and `make bench` (scrypt KDF
+  time and AES-256-GCM seal/open throughput — no LAN needed). Every test invocation pins
+  `--test-concurrency=1`.
+- **`BENCHMARKS.md`** with real `make bench` numbers, a reproduce command, and a machine note.
+
+### Changed
+
+- `src/server.js` `listen()` now rejects its promise on a bind error (previously the server's
+  `error` event was unhandled and crashed the process). The success path is unchanged.
+- README gains a "Scriptable & CI" note, a "Try the attacks: `make attack`" pointer, and a link to
+  `BENCHMARKS.md`.
+
 ## [0.3.0] — 2026-09-17
 
 ### ⚠️ Breaking — update BOTH ends

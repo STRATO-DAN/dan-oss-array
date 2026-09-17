@@ -40,6 +40,28 @@ itself), click **Broadcast & wait for peer**.
 
 **On the receiving machine:** enter the same room code and passphrase, click **Listen for peer**.
 
+## Scriptable & CI
+
+The launcher is script-friendly — hand-rolled flags, zero dependencies:
+
+```bash
+dan-oss-array --version   # prints the version, exit 0
+dan-oss-array --help      # usage, env vars, and the exit-code contract, exit 0
+dan-oss-array --json      # startup banner as one JSON object {url,port,mode,encryption}
+```
+
+The default startup banner stays human-readable; `--json` emits a single machine-readable line
+instead, e.g. `{"url":"http://127.0.0.1:4873","port":4873,"mode":"p2p-basic","encryption":"AES-256-GCM"}`.
+
+**Environment:** `DAN_OSS_ARRAY_PORT` overrides the loopback port (default `4873`).
+
+**Exit codes:** `0` clean startup (or `--version`/`--help`, or a clean Ctrl-C shutdown); `1` startup
+failure (e.g. the port is already in use — one honest stderr line, never a raw stack); `2` usage
+error (an unknown flag).
+
+A `Makefile` wraps the common tasks — `make help` lists them (`make test`, `make attack`,
+`make demo`, `make bench`). Every test invocation pins `--test-concurrency=1`.
+
 ## How it actually works
 
 ```
@@ -151,7 +173,25 @@ npm test
 
 The suite exercises the crypto round-trip, the wrong-passphrase and tampered-ciphertext failures,
 the room-code hashing, and a real end-to-end run where an in-process sender and receiver find each
-other over UDP and transfer over TCP. Most recent run: **10 tests, 10 passed, 0 failed.**
+other over UDP and transfer over TCP.
+
+**Try the attacks.** `make attack` runs only the adversarial/security suites and shows them reject:
+tampered-ciphertext and wrong-passphrase rejection, oversized-frame rejection, cross-origin 403,
+DNS-rebind 403, and garbage-datagram rejection.
+
+```bash
+make attack
+```
+
+**Reproducible crypto-core demo (no LAN needed).** `make demo` seals a secret under a passphrase and
+opens it back, then shows a wrong passphrase and a tampered ciphertext both fail loudly:
+
+```bash
+make demo
+```
+
+**Benchmarks.** `make bench` measures the scrypt passphrase-KDF time and AES-256-GCM seal/open
+throughput. Real numbers and a reproduce command are in [`BENCHMARKS.md`](BENCHMARKS.md).
 
 ## Examples
 
