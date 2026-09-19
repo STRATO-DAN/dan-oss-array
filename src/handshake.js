@@ -22,47 +22,12 @@
 // scrypt (N=16384) makes that costly, and it yields a passphrase guess, never the payload of a past
 // session (that rode an ephemeral key the attacker never had). Higher assurance = the advanced tier.
 import crypto from "node:crypto";
-import os from "node:os";
 import { passphraseKeyAsync, sealCapsule, openCapsule, deriveSessionKeys } from "./crypto.js";
 
 const HS_FRAME_CAP = 8 * 1024; // hello/confirm frames are tiny — this is generous
 export const CAPSULE_CAP = 4 * 1024 * 1024; // an env file is small; this bounds one sealed capsule
 const TOTAL_CAP = CAPSULE_CAP + 64 * 1024; // hard cap on everything a peer may ever send us
 const T_RECEIVER = Buffer.from("confirm-receiver");
-
-// F02: global attempt budget per room — prevents offline passphrase guessing from exceeding
-// the documented "few hundred guesses" characterization. Cleaned up automatically.
-const MAX_ATTEMPTS_PER_ROOM = 50;
-const ATTEMPT_WINDOW_MS = 120_000;
-const attemptCounters = new Map(); // roomCode -> { count, windowStart }
-function checkAttemptBudget(roomCode) {
-  const now = Date.now();
-  let c = attemptCounters.get(roomCode);
-  if (!c || now - c.windowStart > ATTEMPT_WINDOW_MS) {
-    c = { count: 0, windowStart: now };
-    attemptCounters.set(roomCode, c);
-  }
-  c.count++;
-  if (c.count > MAX_ATTEMPTS_PER_ROOM) {
-    throw new Error("attempt budget exceeded — too many passphrase guesses for this room");
-  }
-  return c.count;
-}
-function cleanupAttemptCounters() {
-  const now = Date.now();
-  for (const [room, c] of attemptCounters) {
-    if (now - c.windowStart > ATTEMPT_WINDOW_MS * 2) attemptCounters.delete(room);
-  }
-}
-setInterval(cleanupAttemptCounters, ATTEMPT_WINDOW_MS).unref();
-
-// F01: device identity binding — a fingerprint derived from the machine's hostname + OS + arch.
-// This does NOT prove human identity (that requires PKI), but it prevents a peer on the same LAN
-// from impersonating a different device. The fingerprint is NOT a secret — it is a binding label.
-// Fixed: stdlib import (was require() in ESM, which throws at runtime on every share).
-function deviceFingerprint() {
-  return crypto.createHash("sha256").update(`${os.platform()}:${os.arch()}:${os.hostname()}`).digest("hex").slice(0, 16);
-}
 
 function u32(n) {
   const b = Buffer.alloc(4);
@@ -169,11 +134,7 @@ export async function sharerServe(socket, { passphrase, roomCode, capsulePlain, 
   writeFrame(socket, me.pub); // HELLO back
   const { kEnc, confirmR } = await session(me.privateKey, pubR, pubR, me.pub, passphrase, roomCode);
   const got = await read(); // the receiver's passphrase proof
-  if (!equal(got, confirmR)) {
-    // F02: count failed passphrase attempts against room budget
-    checkAttemptBudget(roomCode);
-    throw new Error("peer did not prove the passphrase — refused");
-  }
+  if (!equal(got, confirmR)) throw new Error("peer did not prove the passphrase — refused");
   // Claim the single-serve slot ATOMICALLY — synchronously, with no await between the claim and the
   // write — right before the capsule touches the wire. If another authenticated peer already won the
   // slot, refuse WITHOUT writing, so two peers that finish their handshakes simultaneously can never
@@ -187,8 +148,6 @@ export async function sharerServe(socket, { passphrase, roomCode, capsulePlain, 
 // an impostor sharer that doesn't know it) yields a capsule that will not open — surfaced by the caller
 // as a decrypt failure, which is the honest answer in both cases.
 export async function receiverFetch(socket, { passphrase, roomCode }) {
-  // F02: check attempt budget
-  checkAttemptBudget(roomCode);
   const read = frameReader(socket);
   const me = ephemeral();
   writeFrame(socket, me.pub); // HELLO
