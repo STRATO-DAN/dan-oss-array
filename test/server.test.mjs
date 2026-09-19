@@ -12,7 +12,7 @@ function request(port, { method = "GET", path = "/", headers = {}, body } = {}) 
     const req = http.request({ host: "127.0.0.1", port, method, path, headers }, (res) => {
       let data = "";
       res.on("data", (c) => (data += c));
-      res.on("end", () => resolve({ status: res.statusCode, body: data }));
+      res.on("end", () => resolve({ status: res.statusCode, body: data, headers: res.headers }));
     });
     req.on("error", reject);
     if (body != null) req.write(body);
@@ -29,6 +29,27 @@ async function withServer(fn) {
     server.close();
   }
 }
+
+test("opaque and other loopback origins are rejected", () => withServer(async (port) => {
+  for (const origin of ["null", "http://localhost:1", "http://127.0.0.1:1", "file://", `https://127.0.0.1:${port}`]) {
+    assert.equal((await request(port, { path: "/api/status", headers: { origin } })).status, 403);
+  }
+}));
+
+test("simple form-compatible requests cannot start transfers", () => withServer(async (port) => {
+  for (const type of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data"]) {
+    const result = await request(port, { method: "POST", path: "/api/share", headers: { "content-type": type }, body: "{}" });
+    assert.equal(result.status, 415);
+  }
+}));
+
+test("responses forbid caching, framing, and inline scripts", () => withServer(async (port) => {
+  const result = await request(port);
+  assert.equal(result.headers["cache-control"], "no-store");
+  assert.equal(result.headers["x-frame-options"], "DENY");
+  assert.match(result.headers["content-security-policy"], /script-src 'self';/);
+  assert.doesNotMatch(result.body, /<script>/);
+}));
 
 test("a request with a NON-loopback Host is refused (DNS-rebinding guard, unchanged)", () =>
   withServer(async (port) => {
