@@ -3,6 +3,16 @@
 All notable changes to `@strato-dan/array` are documented here.
 This project uses [semantic versioning](https://semver.org/).
 
+## [0.5.1] — 2026-09-19
+
+### Fixed
+
+- **Transfer lifetime coupled to client disconnect.** `shareEnv`/`receiveEnv` accept an
+  `AbortSignal`; abort stops the TCP listener, the UDP announcer, and in-flight fetches at
+  once instead of running to timeout after the browser goes away (`Findings 06/07`). Also
+  makes announcer/listener `stop()` idempotent (a double-stop threw
+  `ERR_SOCKET_DGRAM_NOT_RUNNING` and masked real outcomes).
+
 ## [0.5.0] — 2026-09-19
 
 ### Security

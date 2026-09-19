@@ -1,6 +1,6 @@
 {
   "name": "@strato-dan/array",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "[DAN] ARRAY — P2P .env sync, no central server. Basic tier: generic AES-256-GCM encryption, LAN peer discovery, zero runtime dependencies.",
   "license": "MIT",
   "type": "module",
