@@ -3,6 +3,43 @@
 All notable changes to `@strato-dan/array` are documented here.
 This project uses [semantic versioning](https://semver.org/).
 
+## [0.5.0] — 2026-09-19
+
+### Security
+
+- **Device-fingerprint binding on the handshake (F01).** A receiver/sharer fingerprint derived from
+  hostname+OS+arch, so a peer on the same LAN can't silently impersonate a different device
+  mid-session. Not identity/PKI — a binding label, stated honestly as such. Also fixes a real
+  runtime bug: the fingerprint helper used `require()` in an ESM module, which threw on every share.
+- **Per-room passphrase attempt-rate budget (F02).** 50 attempts / 2-minute window on both sharer
+  and receiver, so offline passphrase guessing can't exceed the "few hundred guesses" bound the
+  design already claims.
+- **Strict same-origin check.** `isAllowedOrigin` now requires an exact match against the request's
+  own Host. An opaque/`null` Origin, previously allowed, is now rejected; cross-site
+  `Sec-Fetch-Site` is refused explicitly.
+- **Security response headers** on every response: `Cache-Control: no-store`,
+  `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options: DENY`, and a real CSP
+  (`script-src 'self'`).
+- **Content-type gate.** A POST to `/api/*` without `application/json` is refused (415) before
+  touching the body — closes the simple-request CSRF class (`text/plain`, form-urlencoded,
+  multipart can't reach these routes).
+- **Announcer fan-out cap (FINDING 11).** Capped at 8 distinct announcers per receive — each
+  attempt costs a real scrypt derivation + socket; beyond that, fail closed at timeout instead of
+  unbounded churn against a flooding LAN.
+
+### Added
+
+- Auto-clearing received secrets (5 minutes after a successful receive) plus a manual "Clear
+  visible secrets" button and an unload handler. Documented honestly: clears the DOM, not browser
+  memory/downloads, and doesn't cancel an in-flight transfer.
+- `public/favicon.svg` (was missing, 404 on every page load).
+
+### Fixed
+
+- Honest copy: the trust-model note no longer implies device identity is verified (passphrase
+  knowledge is what's actually checked), and the share-session note no longer implies closing the
+  tab stops an in-flight transfer.
+
 ## [0.4.0] — 2026-09-17
 
 Cross-cutting polish. Purely additive — no change to existing routes, the wire format, or the
