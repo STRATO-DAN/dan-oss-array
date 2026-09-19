@@ -116,14 +116,19 @@ export function createServer() {
         return sendJson(res, 200, { ok: true, mode: "p2p-basic", encryption: "AES-256-GCM (generic, local)" });
       }
 
-      // Held open for as long as sharing runs (until a peer downloads it, or it times out) — the
-      // Transfer lifetime is currently bounded by its timeout, not by browser disconnection.
+      // Held open for as long as sharing runs (until a peer downloads it, it times out, or the
+      // client disconnects) — cancellation is coupled: a closed request aborts the TCP listener
+      // AND the UDP announcer immediately, so server-side transfer never outlives the browser action.
       if (p === "/api/share" && req.method === "POST") {
         const body = await readBody(req);
         const problem = validateShareBody(body);
         if (problem) return sendJson(res, 200, { ok: false, reason: problem });
+        const ac = new AbortController();
+        req.on("close", () => {
+          if (!res.writableEnded) ac.abort();
+        });
         try {
-          const result = await shareEnv(body);
+          const result = await shareEnv(body, { signal: ac.signal });
           return sendJson(res, 200, result);
         } catch (err) {
           return sendJson(res, 200, { ok: false, reason: err.message });
@@ -131,13 +136,18 @@ export function createServer() {
       }
 
       // Same real shape on the receive side — the request holds open until a peer is found and
-      // the transfer completes, or the window closes with an honest "not found" error.
+      // the transfer completes, the window closes with an honest "not found" error, or the client
+      // disconnects (which stops the listener and kills in-flight fetches at once).
       if (p === "/api/receive" && req.method === "POST") {
         const body = await readBody(req);
         if (typeof body.roomCode !== "string" || !body.roomCode) return sendJson(res, 200, { ok: false, reason: "roomCode is required" });
         if (typeof body.passphrase !== "string" || !body.passphrase) return sendJson(res, 200, { ok: false, reason: "passphrase is required" });
+        const ac = new AbortController();
+        req.on("close", () => {
+          if (!res.writableEnded) ac.abort();
+        });
         try {
-          const result = await receiveEnv(body);
+          const result = await receiveEnv(body, { signal: ac.signal });
           return sendJson(res, 200, result);
         } catch (err) {
           return sendJson(res, 200, { ok: false, reason: err.message });

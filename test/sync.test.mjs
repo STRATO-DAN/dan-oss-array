@@ -74,3 +74,58 @@ test("receiveEnv times out honestly when no real peer ever announces", async () 
     /No matching .* peer found/
   );
 });
+
+test("CANCEL: an already-aborted receive never starts listening and rejects at once", async () => {
+  const ac = new AbortController();
+  ac.abort();
+  const started = Date.now();
+  await assert.rejects(
+    receiveEnv({ roomCode: "test-aborted", passphrase: "x", timeoutMs: 5000 }, { signal: ac.signal }),
+    /cancelled/
+  );
+  assert.ok(Date.now() - started < 1000, "must reject immediately, not after the 5s timeout");
+});
+
+test("CANCEL: aborting mid-wait stops the receive well before its timeout", async () => {
+  const ac = new AbortController();
+  const roomCode = `test-cancel-${crypto.randomUUID()}`;
+  const p = receiveEnv({ roomCode, passphrase: "x", timeoutMs: 20000 }, { signal: ac.signal });
+  const assertion = assert.rejects(p, /cancelled/);
+  setTimeout(() => ac.abort(), 100);
+  const started = Date.now();
+  await assertion;
+  assert.ok(Date.now() - started < 5000, "must settle on abort, not on the 20s timeout");
+});
+
+test("CANCEL: an already-aborted share never announces and rejects at once", async () => {
+  const ac = new AbortController();
+  ac.abort();
+  await assert.rejects(
+    shareEnv({ envText: "s", roomCode: "test-aborted-share", passphrase: "x", timeoutMs: 5000 }, { signal: ac.signal }),
+    /cancelled/
+  );
+});
+
+test("CANCEL: aborting a waiting share stops it before its timeout", async () => {
+  const ac = new AbortController();
+  const p = shareEnv(
+    { envText: "s", roomCode: `test-cancel-share-${crypto.randomUUID()}`, passphrase: "x", timeoutMs: 20000 },
+    { signal: ac.signal }
+  );
+  const assertion = assert.rejects(p, /cancelled/);
+  setTimeout(() => ac.abort(), 100);
+  const started = Date.now();
+  await assertion;
+  assert.ok(Date.now() - started < 5000, "must settle on abort, not on the 20s timeout");
+});
+
+test("CANCEL: fetchOnce with an aborted signal never opens a socket", async () => {
+  const { fetchOnce } = await import("../src/peer.js");
+  const ac = new AbortController();
+  ac.abort();
+  // Unroutable port would hang to timeout if the signal were ignored — abort must win first.
+  await assert.rejects(
+    fetchOnce({ address: "127.0.0.1", port: 1, passphrase: "x", roomCode: "y", timeoutMs: 10000, signal: ac.signal }),
+    /cancelled/
+  );
+});
