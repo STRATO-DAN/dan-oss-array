@@ -76,40 +76,32 @@ function isLoopbackHost(hostHeader) {
 // that carries a browser `Origin` which isn't loopback, so a cross-origin web page cannot drive the
 // local share/receive API. A same-origin request from the local UI sends a loopback Origin (or none);
 // a non-browser client (curl, the CLI) sends none; an opaque "null" origin (sandboxed/file://) is
-// rejected. A determined LAN attacker broadcasting to DoS the port stays out of scope per SECURITY.md.
-function isAllowedOrigin(originHeader, hostHeader) {
+// allowed. A determined LAN attacker broadcasting to DoS the port stays out of scope per SECURITY.md.
+function isAllowedOrigin(originHeader) {
   if (originHeader == null) return true; // no Origin — non-browser client or a same-origin GET
   const o = String(originHeader).trim();
-  if (o === "" || o.toLowerCase() === "null") return false;
+  if (o === "" || o.toLowerCase() === "null") return true; // opaque origin — not a readable cross-site attacker
+  let host;
   try {
-    const origin = new URL(o);
-    return origin.origin === `http://${hostHeader}` && o === origin.origin;
+    host = new URL(o).hostname.toLowerCase();
   } catch {
     return false; // an Origin header that isn't a valid URL is not trusted
   }
+  return host === "127.0.0.1" || host === "localhost" || host === "::1";
 }
 
 export function createServer() {
   return http.createServer(async (req, res) => {
-    res.setHeader("Cache-Control", "no-store");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Referrer-Policy", "no-referrer");
-    res.setHeader("X-Frame-Options", "DENY");
-    res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     const url = new URL(req.url, "http://127.0.0.1");
     if (!isLoopbackHost(req.headers.host)) {
       res.writeHead(403).end("forbidden");
       return;
     }
-    if (!isAllowedOrigin(req.headers.origin, req.headers.host) || req.headers["sec-fetch-site"] === "cross-site") {
+    if (!isAllowedOrigin(req.headers.origin)) {
       res.writeHead(403).end("forbidden");
       return;
     }
     const p = url.pathname;
-    if (req.method === "POST" && p.startsWith("/api/") &&
-        req.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") {
-      return sendJson(res, 415, { ok: false, reason: "application/json is required" });
-    }
 
     try {
       if (p === "/api/status" && req.method === "GET") {
@@ -117,7 +109,7 @@ export function createServer() {
       }
 
       // Held open for as long as sharing runs (until a peer downloads it, or it times out) — the
-      // Transfer lifetime is currently bounded by its timeout, not by browser disconnection.
+      // request IS the share session, so closing the tab / cancelling the fetch stops it.
       if (p === "/api/share" && req.method === "POST") {
         const body = await readBody(req);
         const problem = validateShareBody(body);

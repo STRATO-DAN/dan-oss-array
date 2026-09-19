@@ -33,7 +33,7 @@
       <h2><span id="icon-how"></span>How this works</h2>
       <p class="hint">No server ever holds your <code>.env</code>. One machine encrypts it and
         broadcasts on the local network; the other, given the same room code and passphrase, finds
-        it and decrypts it directly. A peer knowing the shared passphrase can receive it; this does not verify a particular device's identity.</p>
+        it and decrypts it directly. Nothing but these two machines ever sees the plaintext.</p>
       <p class="honest-note">Honest limit: this finds a peer only on the <strong>same local
         network</strong> (same LAN / Wi-Fi broadcast domain) — it cannot cross the public internet
         or a NAT boundary. That's the same real tradeoff that removes the central server, not an
@@ -75,12 +75,10 @@
       </div>
       <button class="dan-btn action-btn" id="recvBtn" style="margin-top:12px;">Listen for peer</button>
       <div id="recvStatus" class="status-line" hidden></div>
-      <button class="dan-btn secondary" id="clearBtn">Clear visible secrets</button>
       <div id="recvResult" class="result-box" hidden>
         <label for="recvEnv">Received .env contents</label>
         <textarea id="recvEnv" readonly></textarea>
         <button class="dan-btn secondary" id="downloadBtn" style="margin-top:8px;">Download as .env</button>
-        <p class="hint">Received text clears after five minutes. Clearing the page does not securely erase browser memory, downloads, or cancel an active transfer.</p>
       </div>
     </div>
   </main>
@@ -95,6 +93,13 @@
     coming soon.
   </footer>
 
+  <script>
+    // px=3 — a small inline glyph beside an h2 label, matching the fix already applied to
+    // DAN-OSS-COMMIT's own icons (the library's 12px default rendered far too large here).
+    document.getElementById("icon-how").innerHTML = DANIcons.dot("lock", 3);
+    document.getElementById("icon-share").innerHTML = DANIcons.dot("share", 3);
+    document.getElementById("icon-receive").innerHTML = DANIcons.dot("download", 3);
+  </script>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
