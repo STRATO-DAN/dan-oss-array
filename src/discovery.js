@@ -28,9 +28,17 @@ export function startAnnouncing({ roomCode, tcpPort, intervalMs = ANNOUNCE_INTER
 
   return {
     stop() {
+      // Idempotent: abort paths call stop() from both the abort listener and the finally block —
+      // a second close() on a dead socket throws ERR_SOCKET_DGRAM_NOT_RUNNING, which must never
+      // mask the real (abort) outcome.
+      if (stopped) return;
       stopped = true;
       if (timer) clearInterval(timer);
-      socket.close();
+      try {
+        socket.close();
+      } catch {
+        /* already closed or never bound — stopped is the source of truth */
+      }
     },
   };
 }
@@ -73,9 +81,16 @@ export function startListening({ roomCode, onFound, once = true }) {
 
   socket.bind(DISCOVERY_PORT);
 
+  let listenerStopped = false;
   return {
     stop() {
-      socket.close();
+      if (listenerStopped) return;
+      listenerStopped = true;
+      try {
+        socket.close();
+      } catch {
+        /* already closed — stopped flag is the source of truth */
+      }
     },
   };
 }

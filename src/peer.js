@@ -106,16 +106,29 @@ export function listenForOnePeer({
   };
 }
 
-export function fetchOnce({ address, port, passphrase, roomCode, timeoutMs = 15000 }) {
+export function fetchOnce({ address, port, passphrase, roomCode, timeoutMs = 15000, signal } = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
+    const abortErr = () => {
+      const e = new Error("fetch to the peer was cancelled.");
+      e.name = "AbortError";
+      return e;
+    };
+    // An already-aborted signal never touches the network — fail before connecting.
+    if (signal?.aborted) {
+      reject(abortErr());
+      return;
+    }
     const socket = net.createConnection({ host: address, port });
     const timer = setTimeout(() => finish(reject, new Error("Connection to the peer timed out.")), timeoutMs);
+    const onAbort = () => finish(reject, abortErr());
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
 
     function finish(fn, value) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", onAbort);
       socket.destroy();
       fn(value);
     }
