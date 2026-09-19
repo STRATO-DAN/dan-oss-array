@@ -22,6 +22,9 @@ export async function receiveEnv({ roomCode, passphrase, timeoutMs = 30000 }) {
     let done = false;
     let sawAnnouncer = false;
     const tried = new Set(); // announcers we've already attempted, by address:port
+    // FINDING 11 fix: fan-out budget — each attempt costs scrypt + socket + event loop.
+    // 8 distinct announcers is generous for a LAN; beyond that fail closed rather than churn.
+    const MAX_ANNOUNCERS = 8;
 
     const finish = (fn, value) => {
       if (done) return;
@@ -56,6 +59,7 @@ export async function receiveEnv({ roomCode, passphrase, timeoutMs = 30000 }) {
         if (done) return;
         const key = `${info.address}:${info.tcpPort}`;
         if (tried.has(key)) return; // same announcer re-broadcasting — don't hammer it
+        if (tried.size >= MAX_ANNOUNCERS) return; // budget exhausted — fail closed at timeout
         tried.add(key);
         sawAnnouncer = true;
         try {

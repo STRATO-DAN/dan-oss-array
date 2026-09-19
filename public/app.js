@@ -2,6 +2,17 @@
 // tools. Neither the passphrase nor the raw .env text is ever written to localStorage/sessionStorage
 // — this page keeps no history of a secret past the life of the tab.
 const $ = (id) => document.getElementById(id);
+let secretTimer;
+function clearSecrets() {
+  clearTimeout(secretTimer);
+  for (const id of ["shareEnv", "sharePass", "recvPass", "recvEnv"]) $(id).value = "";
+  $("recvResult").hidden = true;
+}
+$("clearBtn").addEventListener("click", clearSecrets);
+window.addEventListener("pagehide", clearSecrets);
+for (const [id, icon] of [["icon-how", "lock"], ["icon-share", "share"], ["icon-receive", "download"]]) {
+  $(id).innerHTML = window.DANIcons.dot(icon, 3);
+}
 
 // `opts.busy` shows the rotating `.dan-seal` while actively waiting for a peer; `opts.sub` adds a
 // smaller detail line under the main one. Rebuilding the content each call means a later ok/err
@@ -37,6 +48,7 @@ async function postJson(url, body) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+  if (!res.ok) throw new Error(`Server rejected request (${res.status})`);
   return res.json();
 }
 
@@ -98,6 +110,8 @@ async function receive() {
     } else {
       setStatus(status, "ok", `Received from ${data.fromAddress} and decrypted successfully.`);
       $("recvEnv").value = data.envText;
+      clearTimeout(secretTimer);
+      secretTimer = setTimeout(clearSecrets, 5 * 60 * 1000);
       resultBox.hidden = false;
     }
   } catch (err) {
