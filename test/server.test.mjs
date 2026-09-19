@@ -48,7 +48,7 @@ test("responses forbid caching, framing, and inline scripts", () => withServer(a
   assert.equal(result.headers["cache-control"], "no-store");
   assert.equal(result.headers["x-frame-options"], "DENY");
   assert.match(result.headers["content-security-policy"], /script-src 'self';/);
-  assert.doesNotMatch(result.body, /<script>/);
+  assert.doesNotMatch(result.body, /<script>/i);
 }));
 
 test("a request with a NON-loopback Host is refused (DNS-rebinding guard, unchanged)", () =>
