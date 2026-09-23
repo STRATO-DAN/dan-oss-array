@@ -22,7 +22,6 @@
 // scrypt (N=16384) makes that costly, and it yields a passphrase guess, never the payload of a past
 // session (that rode an ephemeral key the attacker never had). Higher assurance = the advanced tier.
 import crypto from "node:crypto";
-import os from "node:os";
 import { passphraseKeyAsync, sealCapsule, openCapsule, deriveSessionKeys } from "./crypto.js";
 
 const HS_FRAME_CAP = 8 * 1024; // hello/confirm frames are tiny — this is generous
@@ -55,14 +54,6 @@ function cleanupAttemptCounters() {
   }
 }
 setInterval(cleanupAttemptCounters, ATTEMPT_WINDOW_MS).unref();
-
-// F01: device identity binding — a fingerprint derived from the machine's hostname + OS + arch.
-// This does NOT prove human identity (that requires PKI), but it prevents a peer on the same LAN
-// from impersonating a different device. The fingerprint is NOT a secret — it is a binding label.
-// Fixed: stdlib import (was require() in ESM, which throws at runtime on every share).
-function deviceFingerprint() {
-  return crypto.createHash("sha256").update(`${os.platform()}:${os.arch()}:${os.hostname()}`).digest("hex").slice(0, 16);
-}
 
 function u32(n) {
   const b = Buffer.alloc(4);

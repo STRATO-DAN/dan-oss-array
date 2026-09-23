@@ -202,3 +202,9 @@ test("the session key needs BOTH the ephemeral secret and the passphrase (capsul
     Buffer.concat([d.update(ct), d.final()]);
   });
 });
+
+test("SECURITY (0.5.2): deviceFingerprint is fully removed, not left as unreferenced dead code (was a false claim: 0.5.0's changelog said it was bound into the handshake; it never had a single caller)", async () => {
+  const src = await (await import("node:fs/promises")).readFile(new URL("../src/handshake.js", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /deviceFingerprint/, "the removed function (and any reference to it) must not reappear in handshake.js");
+  assert.doesNotMatch(src, /from "node:os"/, "the now-unused os import must not reappear either");
+});

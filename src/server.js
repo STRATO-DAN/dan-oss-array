@@ -51,10 +51,26 @@ async function serveStatic(res, urlPath) {
   }
 }
 
+// 🔴 Room-code length — roomHash() (crypto.js) broadcasts an unsalted, truncated SHA-256 of the room
+// code in every UDP announce (it has to be public: peers need it to find each other before any secret
+// is exchanged). A short code is cheap to brute-force back from that hash — 4 characters is recoverable
+// in low thousands of tries, milliseconds. This alone never leaks the payload (the passphrase-derived
+// scrypt key still guards that), but it hands an attacker the exact room to target with their online
+// guessing budget instead of guessing rooms blind. 10 lowercase-alnum chars raises the offline search
+// space enough that brute-forcing the hash back to a code stops being the cheap step in an attack.
+const MIN_ROOM_CODE_LENGTH = 10;
+
 function validateShareBody(body) {
   if (typeof body.envText !== "string" || !body.envText.trim()) return "envText is required";
-  if (typeof body.roomCode !== "string" || body.roomCode.length < 4) return "roomCode must be at least 4 characters";
+  if (typeof body.roomCode !== "string" || body.roomCode.length < MIN_ROOM_CODE_LENGTH)
+    return `roomCode must be at least ${MIN_ROOM_CODE_LENGTH} characters`;
   if (typeof body.passphrase !== "string" || body.passphrase.length < 8) return "passphrase must be at least 8 characters";
+  // 🔴 A passphrase equal to the room code collapses two independent secrets into one: roomHash is
+  // PUBLIC (broadcast every announce), so if the passphrase reuses that same string, brute-forcing the
+  // public hash back to the room code (cheap, see above) also recovers the passphrase that guards the
+  // payload — the two layers stop being independent. Reject the reuse outright rather than relying on
+  // room-code length alone to make that combined attack merely "harder."
+  if (body.passphrase === body.roomCode) return "passphrase must not be the same as roomCode";
   return null;
 }
 
