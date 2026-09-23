@@ -48,8 +48,19 @@ export async function decrypt(blob, passphrase) {
   return plaintext.toString("utf8");
 }
 
+// 🔴 Truncation length, 2026-09-24: bumped 16 -> 32 hex chars (64 -> 128 bits). This is real
+// defense-in-depth margin, not a fix to a demonstrated weakness — the actual attack surface here
+// is the ROOM CODE's own entropy (an attacker brute-forces candidate room codes and checks the
+// hash, so the search space is bounded by the code, not the hash), which server.js's own
+// MIN_ROOM_CODE_LENGTH (4 -> 10) already closes. 128 bits of truncation is far beyond any
+// realistic room-code entropy ceiling either way, so this doesn't change the real security
+// property -- it removes any lingering doubt about the hash itself being short, cheaply (16 more
+// hex chars in a JSON field over UDP, negligible), for an open-source tool with no reason to make
+// a reader wonder why this one value looks unusually short next to every other hash in this
+// codebase (which are all full, untruncated SHA-256 digests -- checked directly against every
+// other DAN OSS repo before making this change; this was the only truncated hash anywhere).
 export function roomHash(roomCode) {
-  return crypto.createHash("sha256").update(roomCode).digest("hex").slice(0, 16);
+  return crypto.createHash("sha256").update(roomCode).digest("hex").slice(0, 32);
 }
 
 // ── authenticated-transport primitives (v2) ─────────────────────────────────────────────────────

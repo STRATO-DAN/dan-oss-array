@@ -3,6 +3,19 @@
 All notable changes to `@strato-dan/array` are documented here.
 This project uses [semantic versioning](https://semver.org/).
 
+## [0.5.3] — 2026-09-24
+
+### Security
+
+- **`roomHash` truncation raised 16 → 32 hex characters (64 → 128 bits).** A full repo-wide sweep
+  confirmed this was the *only* truncated hash anywhere across all 6 DAN OSS repos — every other
+  hash (audit chains, token hashes, identity hashes) uses the full, untruncated SHA-256 hex digest.
+  This is real defense-in-depth margin, not a fix to a demonstrated weakness: the actual attack
+  surface is the room code's own entropy (bounded by its length, already raised 4 → 10 in 0.5.2),
+  not the hash truncation length. 128 bits is far beyond any realistic room-code entropy ceiling
+  either way — this closes any remaining doubt about the hash itself looking unusually short next
+  to the rest of this codebase, cheaply (16 more hex characters in a JSON field over UDP).
+
 ## [0.5.2] — 2026-09-23
 
 ### Security

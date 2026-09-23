@@ -38,7 +38,15 @@ test("two real encryptions of the same plaintext produce different ciphertext (r
 test("roomHash is deterministic for the same room code and differs for a different one", () => {
   assert.equal(roomHash("my-room"), roomHash("my-room"));
   assert.notEqual(roomHash("my-room"), roomHash("other-room"));
-  assert.equal(roomHash("my-room").length, 16);
+  assert.equal(roomHash("my-room").length, 32);
+});
+
+test("roomHash is a real 128-bit truncation, not the old 64-bit length (2026-09-24 hardening)", () => {
+  // Real, direct regression coverage for the length bump itself, not just an incidental assert
+  // inside a different test — a future accidental revert should fail here specifically.
+  const hash = roomHash("any-room-code");
+  assert.equal(hash.length, 32);
+  assert.match(hash, /^[0-9a-f]{32}$/, "must be real lowercase hex, not just the right length");
 });
 
 test("roomHash never returns the real room code itself, only a real hash of it", () => {
