@@ -98,3 +98,74 @@ test("A2: a non-browser request (no Origin) still works — the guard only rejec
     assert.equal(res.status, 200);
     assert.match(res.body, /"ok":false/, "reached the share validator rather than being blocked as cross-origin");
   }));
+
+// --- 0.5.2 security fixes -----------------------------------------------------------------
+
+test("SECURITY: a roomCode shorter than 10 chars is refused (was 4 — cheap to brute-force back from the public roomHash)", () =>
+  withServer(async (port) => {
+    const res = await request(port, {
+      method: "POST",
+      path: "/api/share",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ envText: "X=1", roomCode: "shortcode", passphrase: "a-real-passphrase" }), // 9 chars
+    });
+    assert.equal(res.status, 200);
+    assert.match(res.body, /"ok":false/);
+    assert.match(res.body, /roomCode must be at least 10 characters/);
+  }));
+
+// A body that PASSES validateShareBody moves on to a real shareEnv() call that holds the request
+// open waiting for a peer (no immediate response) — unlike a validation failure, which responds
+// synchronously with ok:false. So "did the response NOT arrive quickly" is real proof the gate was
+// passed, without needing a live peer or waiting for the full (multi-second) share timeout.
+function passesValidationGate(port, body) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: "127.0.0.1", port, method: "POST", path: "/api/share", headers: { "content-type": "application/json" } },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => resolve({ respondedFast: true, body: data }));
+      }
+    );
+    req.on("error", () => {}); // destroying below always triggers a benign socket-error — expected, not a failure
+    req.write(body);
+    req.end();
+    setTimeout(() => {
+      req.destroy(); // abort — the server's req.on("close") stops the in-flight shareEnv() cleanly
+      resolve({ respondedFast: false });
+    }, 300);
+  });
+}
+
+test("SECURITY: a roomCode of exactly 10 chars is accepted by the length check (boundary)", () =>
+  withServer(async (port) => {
+    const result = await passesValidationGate(
+      port,
+      JSON.stringify({ envText: "X=1", roomCode: "tencharcod", passphrase: "a-real-passphrase" }) // 10 chars
+    );
+    assert.equal(result.respondedFast, false, "a valid-length roomCode should pass validation and reach the real share path, not respond synchronously");
+  }));
+
+test("SECURITY: a passphrase identical to the roomCode is refused (collapses the public roomHash and the secret passphrase into one enumerable value)", () =>
+  withServer(async (port) => {
+    const reused = "same-value-reused-here";
+    const res = await request(port, {
+      method: "POST",
+      path: "/api/share",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ envText: "X=1", roomCode: reused, passphrase: reused }),
+    });
+    assert.equal(res.status, 200);
+    assert.match(res.body, /"ok":false/);
+    assert.match(res.body, /passphrase must not be the same as roomCode/);
+  }));
+
+test("SECURITY: a passphrase different from the roomCode passes that specific check", () =>
+  withServer(async (port) => {
+    const result = await passesValidationGate(
+      port,
+      JSON.stringify({ envText: "X=1", roomCode: "tencharcod", passphrase: "a-totally-different-passphrase" })
+    );
+    assert.equal(result.respondedFast, false, "a distinct passphrase/roomCode pair should pass validation and reach the real share path, not respond synchronously");
+  }));

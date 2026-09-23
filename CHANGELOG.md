@@ -3,6 +3,35 @@
 All notable changes to `@strato-dan/array` are documented here.
 This project uses [semantic versioning](https://semver.org/).
 
+## [0.5.2] — 2026-09-23
+
+### Security
+
+- **Room-code enumeration hardened.** `roomHash` (broadcast in every UDP announce, by necessity —
+  peers need it to find each other before any secret exists) is an unsalted, truncated SHA-256 of
+  the room code. A short code is cheap to brute-force back from that public hash: a 4-character
+  code was recoverable in ~2,300 tries / 3ms. This alone never exposes the transfer payload — the
+  passphrase-derived scrypt session key still guards that — but it hands a passive LAN listener the
+  exact room to target with their online guessing budget instead of guessing blind. Minimum
+  room-code length raised 4 → 10 characters, and `validateShareBody` now rejects a passphrase equal
+  to the room code (a reused string collapsed the two independent secrets into one enumerable
+  value, since the room code's hash is public but the passphrase is not).
+
+### Fixed
+
+- **CORRECTION to 0.5.0's "Device-fingerprint binding on the handshake (F01)" entry below.** That
+  entry claimed a receiver/sharer fingerprint was bound into the handshake to prevent LAN device
+  impersonation. It never was: `deviceFingerprint()` was defined and documented, but had zero
+  callers anywhere in `src`/`test`/`bin`/`public` — dead code since it was added, and the 0.5.0
+  changelog entry describing it as live handshake binding was inaccurate. Removed the unused
+  function rather than retroactively wiring it in: doing so now would be a breaking wire-protocol
+  change (older and newer peers would fail to interoperate) for a property that was always
+  honestly weak on its own — the fingerprint is self-asserted, non-secret metadata, not a
+  cryptographic proof of device identity, so an active impersonator could simply claim any
+  fingerprint. No real security property regresses: the handshake's actual authentication (X25519
+  ephemeral key agreement + scrypt passphrase-derived session key + receiver-proves-first ordering)
+  never depended on this function, and F02's per-room attempt-rate budget is unaffected.
+
 ## [0.5.1] — 2026-09-19
 
 ### Fixed
